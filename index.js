@@ -90,8 +90,21 @@ function generatePlayerHtml(m3u8Url, currentUrl) {
                             }
                             localStorage.setItem('lastEpisodeAt', String(Date.now()));
                         } catch (e) {}
+                        var finishThresholdSec = 3;
+                        function clearResumeState() {
+                            try {
+                                localStorage.removeItem('lastEpisodeTimeSec');
+                                localStorage.removeItem('lastEpisodeUrl');
+                                localStorage.removeItem('lastEpisodeNum');
+                                localStorage.removeItem('lastEpisodeAt');
+                            } catch (e) {}
+                        }
                         function saveResumeTime() {
                             try {
+                                if (isFinite(video.duration) && isFinite(video.currentTime) && video.currentTime >= video.duration - finishThresholdSec) {
+                                    clearResumeState();
+                                    return;
+                                }
                                 if (isFinite(video.currentTime)) {
                                     localStorage.setItem('lastEpisodeTimeSec', String(Math.floor(video.currentTime)));
                                 }
@@ -114,6 +127,9 @@ function generatePlayerHtml(m3u8Url, currentUrl) {
                                 lastSaveAt = now;
                                 saveResumeTime();
                             }
+                        });
+                        video.addEventListener('ended', function () {
+                            clearResumeState();
                         });
                         document.addEventListener('visibilitychange', function () {
                             if (document.hidden) saveResumeTime();
