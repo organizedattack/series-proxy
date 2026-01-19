@@ -46,8 +46,10 @@ async function getM3u8FromIframe(iframeUrl, referer) {
 function generatePlayerHtml(m3u8Url, currentUrl) {
     let prevUrl = null, nextUrl = null;
     const match = currentUrl.match(/(.*-capitulo-)(\d+)(\/?.*)/);
+    let currentNum = null;
     if (match) {
         const base = match[1], num = parseInt(match[2]), suffix = match[3];
+        currentNum = num;
         if (num > 1) prevUrl = `${base}${num - 1}${suffix}`;
         if (num < 301) nextUrl = `${base}${num + 1}${suffix}`;
     }
@@ -77,6 +79,46 @@ function generatePlayerHtml(m3u8Url, currentUrl) {
                     <script>
                         var video = document.getElementById('video');
                         var videoSrc = "${m3u8Url}";
+                        var currentUrl = "${currentUrl}";
+                        var currentNum = ${currentNum !== null ? currentNum : 'null'};
+                        try {
+                            if (currentUrl) {
+                                localStorage.setItem('lastEpisodeUrl', currentUrl);
+                            }
+                            if (currentNum !== null) {
+                                localStorage.setItem('lastEpisodeNum', String(currentNum));
+                            }
+                            localStorage.setItem('lastEpisodeAt', String(Date.now()));
+                        } catch (e) {}
+                        function saveResumeTime() {
+                            try {
+                                if (isFinite(video.currentTime)) {
+                                    localStorage.setItem('lastEpisodeTimeSec', String(Math.floor(video.currentTime)));
+                                }
+                            } catch (e) {}
+                        }
+                        try {
+                            var lastUrl = localStorage.getItem('lastEpisodeUrl');
+                            var lastTime = parseFloat(localStorage.getItem('lastEpisodeTimeSec') || '0');
+                            if (lastUrl === currentUrl && lastTime > 5) {
+                                video.addEventListener('loadedmetadata', function () {
+                                    if (isFinite(video.duration) && lastTime > video.duration - 5) return;
+                                    video.currentTime = lastTime;
+                                });
+                            }
+                        } catch (e) {}
+                        var lastSaveAt = 0;
+                        video.addEventListener('timeupdate', function () {
+                            var now = Date.now();
+                            if (now - lastSaveAt > 5000) {
+                                lastSaveAt = now;
+                                saveResumeTime();
+                            }
+                        });
+                        document.addEventListener('visibilitychange', function () {
+                            if (document.hidden) saveResumeTime();
+                        });
+                        window.addEventListener('beforeunload', saveResumeTime);
                         if (Hls.isSupported()) {
                             var hls = new Hls();
                             hls.loadSource(videoSrc);
@@ -138,6 +180,7 @@ app.get('/', (req, res) => {
                     #search { width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #333; background: #222; color: white; margin-bottom: 20px; box-sizing: border-box; }
                     .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(80px, 1fr)); gap: 8px; }
                     .episode { background: #222; padding: 12px 5px; text-align: center; border-radius: 8px; text-decoration: none; color: white; font-size: 0.85rem; border: 1px solid #333; }
+                    .episode.resume { border-color: #00d1b2; box-shadow: 0 0 0 1px #00d1b2 inset; }
                     .episode.hidden { display: none; }
                     @media (max-width: 480px) { .grid { grid-template-columns: repeat(3, 1fr); } }
                 </style>
@@ -145,12 +188,42 @@ app.get('/', (req, res) => {
             <body>
                 <h1>La Novia de Estambul</h1>
                 <div class="container">
+                    <div id="continue" style="display:none; margin-bottom: 15px; padding: 12px; border: 1px solid #333; border-radius: 8px; background: #1a1a1a;">
+                        <div style="margin-bottom: 8px;">Continue watching</div>
+                        <a id="continueLink" href="#" style="display:inline-block; background:#00d1b2; color:#fff; padding:10px 14px; border-radius:8px; text-decoration:none; font-weight:bold;">Resume</a>
+                    </div>
                     <input type="text" id="search" placeholder="🔍 Search episode..." onkeyup="filter()">
                     <div class="grid" id="grid">
                         ${episodes.map(ep => `<a class="episode" href="/video?url=${encodeURIComponent(ep.url)}" data-num="${ep.num}">E${ep.num}</a>`).join('')}
                     </div>
                 </div>
                 <script>
+                    (function () {
+                        try {
+                            var lastUrl = localStorage.getItem('lastEpisodeUrl');
+                            var lastNum = localStorage.getItem('lastEpisodeNum');
+                            var lastTime = parseInt(localStorage.getItem('lastEpisodeTimeSec') || '0', 10);
+                            function formatTime(totalSeconds) {
+                                var s = Math.max(0, totalSeconds || 0);
+                                var m = Math.floor(s / 60);
+                                var r = s % 60;
+                                return m + ":" + (r < 10 ? "0" + r : r);
+                            }
+                            if (lastUrl) {
+                                var c = document.getElementById('continue');
+                                var link = document.getElementById('continueLink');
+                                link.href = "/video?url=" + encodeURIComponent(lastUrl);
+                                if (lastNum) {
+                                    link.textContent = "Resume E" + lastNum + (lastTime > 0 ? " at " + formatTime(lastTime) : "");
+                                }
+                                c.style.display = "block";
+                            }
+                            if (lastNum) {
+                                var el = document.querySelector('.episode[data-num="' + lastNum + '"]');
+                                if (el) el.classList.add('resume');
+                            }
+                        } catch (e) {}
+                    })();
                     function filter() {
                         var val = document.getElementById('search').value;
                         var items = document.getElementsByClassName('episode');
@@ -165,3 +238,5 @@ app.get('/', (req, res) => {
 });
 
 app.listen(PORT, '0.0.0.0', () => console.log(`Server on port ${PORT}`));
+
+
